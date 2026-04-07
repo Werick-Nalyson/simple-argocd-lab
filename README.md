@@ -12,12 +12,16 @@ O **ArgoCD** é uma ferramenta de entrega contínua declarativa para Kubernetes,
 
 No GitOps, em vez de executar `kubectl apply` em um pipeline de CI, você:
 
-1. Commita a mudança desejada (novo manifesto, nova tag de imagem) no Git
-2. O ArgoCD detecta a divergência entre o que está no Git e o que está no cluster
-3. O ArgoCD reconcilia o cluster automaticamente para corresponder ao estado do Git
+1. Commita o código da aplicação no Git
+2. O GitHub Actions faz o build, publica a imagem no Docker Hub e **atualiza automaticamente** a tag em `k8s/kustomization.yaml`
+3. O ArgoCD detecta a mudança no `kustomization.yaml` e reconcilia o cluster
 
 ```
-Developer → git push → GitHub → ArgoCD detecta → kubectl apply (automático)
+git push (app/) → Actions: docker build+push → kustomize edit set image
+                                                    ↓
+                          ArgoCD detecta mudança no kustomization.yaml
+                                                    ↓
+                                    kubectl apply (automático)
 ```
 
 ### Por que GitOps?
@@ -49,8 +53,10 @@ Developer → git push → GitHub → ArgoCD detecta → kubectl apply (automát
    │  GitHub Actions   │   │       ArgoCD          │
    │  (push em app/)   │   │  (observa k8s/)       │
    │                   │   │                       │
-   │  docker build     │   │  detecta divergência  │
-   │  docker push      │   │  reconcilia cluster   │
+   │  docker build     │   │  detecta mudança      │
+   │  docker push      │   │  em kustomization.yaml│
+   │  kustomize update │   │  reconcilia cluster   │
+   │  git commit+push  │   │                       │
    └─────────┬─────────┘   └──────────┬────────────┘
              │                        │
              ▼                        ▼
@@ -62,11 +68,11 @@ Developer → git push → GitHub → ArgoCD detecta → kubectl apply (automát
    └───────────────────┘   └──────────────────────┘
 ```
 
-**Loop GitOps completo:**
-1. Dev atualiza a tag de imagem em `k8s/deployment.yaml` e faz push
-2. ArgoCD detecta a mudança no repositório
-3. ArgoCD aplica o manifesto atualizado no cluster
-4. Novo pod sobe com a nova imagem — zero intervenção manual
+**Loop GitOps totalmente automatizado:**
+1. Dev faz push do código em `app/`
+2. GitHub Actions: build → push Docker Hub → `kustomize edit set image :sha-XXXXX` → commit+push em `k8s/kustomization.yaml`
+3. ArgoCD detecta a mudança no `kustomization.yaml` e sincroniza o cluster
+4. Novo pod sobe com a nova imagem — **zero intervenção manual**, nem mesmo na tag
 
 ---
 
@@ -200,35 +206,24 @@ argocd login localhost:30443 \
   --insecure
 ```
 
-### Passo 10 — Verificar o build do GitHub Actions
+### Passo 10 — Verificar o pipeline automático
 
-O push do Passo 3 deve ter disparado o workflow. Verifique em:
-**GitHub → seu repositório → Actions**
+O push do Passo 3 disparou o workflow. O pipeline executa automaticamente:
 
-Após o build concluir, você terá a imagem publicada no Docker Hub com tags:
-- `seunome/argocdlab-app:latest`
-- `seunome/argocdlab-app:sha-abc1234` (hash curto do commit)
+1. Build e push da imagem Docker Hub com tags `latest` e `sha-XXXXXXX`
+2. Atualiza `k8s/kustomization.yaml` com a nova tag via `kustomize edit set image`
+3. Faz commit e push do `kustomization.yaml` atualizado de volta ao repositório
 
-### Passo 11 — Atualizar o manifesto com a tag do build
+Acompanhe em: **GitHub → seu repositório → Actions**
 
-Copie a tag `sha-XXXXXXX` gerada pelo Actions e atualize `k8s/deployment.yaml`:
-
+Após o pipeline concluir, o arquivo `k8s/kustomization.yaml` no repositório terá:
 ```yaml
-image: seunome/argocdlab-app:sha-abc1234
-env:
-  - name: APP_VERSION
-    value: "1.0.0-sha-abc1234"
+images:
+  - name: wericknalyson/argocdlab-app
+    newTag: sha-abc1234
 ```
 
-Faça push da mudança:
-
-```bash
-git add k8s/deployment.yaml
-git commit -m "deploy: image sha-abc1234"
-git push
-```
-
-### Passo 12 — Aplicar o Application do ArgoCD
+### Passo 11 — Aplicar o Application do ArgoCD
 
 ```bash
 kubectl apply -f argocd/application.yaml
@@ -242,7 +237,7 @@ argocd app get argocdlab-app
 
 Você deve ver `STATUS: Synced` e `HEALTH: Healthy`.
 
-### Passo 13 — Acessar a aplicação
+### Passo 12 — Acessar a aplicação
 
 ```bash
 curl http://localhost:30081
@@ -298,12 +293,15 @@ kubectl scale deployment argocdlab-app -n argocdlab --replicas=1
 
 Aguarde alguns segundos — o ArgoCD vai detectar o drift e restaurar para 3 replicas automaticamente.
 
-### Exemplo 3 — Deploy de nova versão
+### Exemplo 3 — Deploy de nova versão (totalmente automático)
 
 1. Faça uma mudança em `app/src/index.js` (ex: mude a mensagem)
-2. Faça push — o GitHub Actions constrói e publica nova imagem
-3. Atualize a tag em `k8s/deployment.yaml` e faça push
-4. Observe o rolling update: `kubectl get pods -n argocdlab -w`
+2. Faça push — o GitHub Actions constrói e publica a nova imagem
+3. O pipeline atualiza automaticamente `k8s/kustomization.yaml` com a nova tag
+4. O ArgoCD detecta a mudança e faz o rolling update
+5. Observe: `kubectl get pods -n argocdlab -w`
+
+Nenhuma intervenção manual necessária após o push.
 
 ---
 
@@ -399,6 +397,7 @@ argocdlab/
 │   ├── package.json
 │   └── Dockerfile            # Multi-stage build, non-root user
 ├── k8s/
+│   ├── kustomization.yaml     # Gerencia tag da imagem (atualizado pelo CI)
 │   ├── namespace.yaml         # Namespace: argocdlab
 │   ├── deployment.yaml        # 2 replicas, probes, resource limits
 │   └── service.yaml           # NodePort 30081

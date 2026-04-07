@@ -17,7 +17,7 @@ jobs:
     name: Build and Push
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -54,5 +54,19 @@ jobs:
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
 
-      - name: Image digest
-        run: echo "Pushed image digest ${{ steps.build-and-push.outputs.digest }}"
+      - name: Setup Kustomize
+        uses: imranismail/setup-kustomize@v2
+
+      - name: Update image tag in kustomization
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          cd k8s
+          kustomize edit set image ${{ env.IMAGE_NAME }}:sha-${SHORT_SHA}
+
+      - name: Commit and push kustomization update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s/kustomization.yaml
+          git diff --staged --quiet || git commit -m "chore: deploy image sha-$(git rev-parse --short HEAD) [skip ci]"
+          git push
