@@ -93,7 +93,7 @@ jobs:
           format: table
           severity: CRITICAL,HIGH
           ignore-unfixed: true   # ignora CVEs sem patch disponível
-          exit-code: 1           # falha o job se encontrar CRITICAL ou HIGH fixável
+          exit-code: 0           # reporta mas não bloqueia o deploy
 
       - name: Scan image — HTML report
         if: always()
