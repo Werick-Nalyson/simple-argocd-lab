@@ -9,7 +9,7 @@ const START_TIME = Date.now();
 app.get('/', (req, res) => {
   const uptimeSeconds = Math.floor((Date.now() - START_TIME) / 1000);
   res.json({
-    message: 'Hello from ArgoCD Lab!',
+    message: 'Hello from ArgoCD Lab! 1',
     version: VERSION,
     hostname: os.hostname(),
     uptime: `${uptimeSeconds}s`,
