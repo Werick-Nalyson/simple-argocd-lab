@@ -79,7 +79,7 @@ jobs:
         uses: actions/checkout@v4
 
       # ── 1. Scan da imagem Docker (CVEs nos pacotes do OS e dependências) ──
-      - name: Scan image — table output (summary)
+      - name: Scan image — table output (summary no log)
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: image
@@ -89,7 +89,19 @@ jobs:
           ignore-unfixed: true   # ignora CVEs sem patch disponível
           exit-code: 1           # falha o job se encontrar CRITICAL ou HIGH fixável
 
-      - name: Scan image — JSON report (artefato)
+      - name: Scan image — HTML report
+        if: always()
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: image
+          image-ref: ${{ env.IMAGE_NAME }}:sha-${{ needs.build-and-push.outputs.image-tag }}
+          format: template
+          template: '@/contrib/html.tpl'
+          output: trivy-image.html
+          severity: CRITICAL,HIGH,MEDIUM
+          ignore-unfixed: true
+
+      - name: Scan image — JSON report
         if: always()
         uses: aquasecurity/trivy-action@master
         with:
@@ -101,7 +113,7 @@ jobs:
           ignore-unfixed: true
 
       # ── 2. Scan de IaC (Dockerfile + manifestos Kubernetes) ──
-      - name: Scan IaC — table output (summary)
+      - name: Scan IaC — table output (summary no log)
         if: always()
         uses: aquasecurity/trivy-action@master
         with:
@@ -111,7 +123,18 @@ jobs:
           severity: CRITICAL,HIGH
           exit-code: 0           # reporta mas não bloqueia o deploy por má config
 
-      - name: Scan IaC — JSON report (artefato)
+      - name: Scan IaC — HTML report
+        if: always()
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: config
+          scan-ref: .
+          format: template
+          template: '@/contrib/html.tpl'
+          output: trivy-iac.html
+          severity: CRITICAL,HIGH,MEDIUM
+
+      - name: Scan IaC — JSON report
         if: always()
         uses: aquasecurity/trivy-action@master
         with:
@@ -128,7 +151,9 @@ jobs:
         with:
           name: trivy-reports-sha-${{ needs.build-and-push.outputs.image-tag }}
           path: |
+            trivy-image.html
             trivy-image.json
+            trivy-iac.html
             trivy-iac.json
           retention-days: 30
 

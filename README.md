@@ -338,22 +338,41 @@ O deploy **nunca acontece** se o scan da imagem encontrar vulnerabilidade com se
 
 Como o repositório é **privado no plano GitHub Free**, o GitHub Advanced Security (Code Scanning) não está disponível. Os relatórios são salvos como **artefatos do workflow** e ficam disponíveis por 30 dias.
 
-Para baixar e inspecionar:
+Cada execução gera 4 artefatos:
+
+| Arquivo | Formato | Uso |
+|---------|---------|-----|
+| `trivy-image.html` | HTML | Abrir no browser — visão amigável dos CVEs da imagem |
+| `trivy-iac.html` | HTML | Abrir no browser — visão amigável dos problemas de IaC |
+| `trivy-image.json` | JSON | Integração com outras ferramentas, auditoria |
+| `trivy-iac.json` | JSON | Integração com outras ferramentas, auditoria |
+
+#### Baixar e visualizar os relatórios HTML
 
 ```bash
 # Listar execuções recentes do workflow
 gh run list --workflow=build-push.yml
 
-# Baixar os artefatos de uma execução específica
+# Baixar todos os artefatos de uma execução
 gh run download <run-id> --name trivy-reports-sha-abc1234
 
-# Inspecionar vulnerabilidades da imagem
+# Abrir o relatório HTML no browser
+open trivy-reports-sha-abc1234/trivy-image.html
+open trivy-reports-sha-abc1234/trivy-iac.html
+```
+
+O relatório HTML exibe uma tabela com severidade, pacote afetado, versão vulnerável, versão corrigida e link direto para o CVE.
+
+#### Inspecionar os JSONs via linha de comando (opcional)
+
+```bash
+# Vulnerabilidades da imagem
 cat trivy-image.json | jq '
   .Results[].Vulnerabilities[]? |
   {pkg: .PkgName, cve: .VulnerabilityID, severity: .Severity, fixed: .FixedVersion}
 '
 
-# Inspecionar problemas de IaC
+# Problemas de IaC
 cat trivy-iac.json | jq '
   .Results[].Misconfigurations[]? |
   {id: .ID, title: .Title, severity: .Severity, resolution: .Resolution}
