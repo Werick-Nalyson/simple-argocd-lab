@@ -305,6 +305,106 @@ Nenhuma intervenção manual necessária após o push.
 
 ---
 
+## Segurança — Scan com Trivy
+
+O pipeline inclui análise de segurança automática via **Trivy** (Aqua Security) antes de qualquer deploy. O scan roda no **Job 2** do workflow, entre o build e a atualização dos manifestos.
+
+### O que é o Trivy?
+
+Trivy é um scanner de segurança open source que cobre múltiplas superfícies de ataque em uma única ferramenta:
+
+| Superfície | O que detecta |
+|------------|---------------|
+| **Imagem Docker** | CVEs em pacotes do OS (Alpine, Debian...) e dependências de linguagem |
+| **Dockerfile** | Má configuração (root user, `latest` tag, ausência de HEALTHCHECK...) |
+| **Manifestos Kubernetes** | Má configuração (sem limites de recursos, `privileged: true`, sem probes...) |
+| **Código-fonte** | Secrets hardcoded (tokens, chaves, senhas) |
+
+### Como funciona no pipeline
+
+```
+[Job 1] build-and-push
+        ↓
+[Job 2] scan ← Trivy roda aqui
+   ├─ Scan da imagem: CRITICAL/HIGH fixável → exit-code 1 → bloqueia Job 3
+   └─ Scan de IaC:    CRITICAL/HIGH         → exit-code 0 → reporta, não bloqueia
+        ↓ (só se scan passou)
+[Job 3] update-manifests → ArgoCD sync
+```
+
+O deploy **nunca acontece** se o scan da imagem encontrar vulnerabilidade com severidade `CRITICAL` ou `HIGH` que já tenha correção disponível (`ignore-unfixed: true`).
+
+### Relatórios gerados
+
+Como o repositório é **privado no plano GitHub Free**, o GitHub Advanced Security (Code Scanning) não está disponível. Os relatórios são salvos como **artefatos do workflow** e ficam disponíveis por 30 dias.
+
+Para baixar e inspecionar:
+
+```bash
+# Listar execuções recentes do workflow
+gh run list --workflow=build-push.yml
+
+# Baixar os artefatos de uma execução específica
+gh run download <run-id> --name trivy-reports-sha-abc1234
+
+# Inspecionar vulnerabilidades da imagem
+cat trivy-image.json | jq '
+  .Results[].Vulnerabilities[]? |
+  {pkg: .PkgName, cve: .VulnerabilityID, severity: .Severity, fixed: .FixedVersion}
+'
+
+# Inspecionar problemas de IaC
+cat trivy-iac.json | jq '
+  .Results[].Misconfigurations[]? |
+  {id: .ID, title: .Title, severity: .Severity, resolution: .Resolution}
+'
+```
+
+### Comparativo por plano GitHub
+
+| Recurso | Repo privado (free) | Repo público | Enterprise |
+|---------|--------------------|--------------|----|
+| Log no Actions (table) | Sim | Sim | Sim |
+| Artefato JSON para download | Sim | Sim | Sim |
+| GitHub Security → Code scanning | Não | Sim | Sim |
+| Bloqueia deploy se CRITICAL/HIGH | Sim | Sim | Sim |
+
+> Para habilitar o GitHub Security no futuro (tornando o repo público ou migrando para Enterprise), substitua os steps `actions/upload-artifact` por `github/codeql-action/upload-sarif` no workflow — os resultados aparecerão em **Security → Code scanning alerts**.
+
+### Outras ferramentas do ecossistema
+
+Caso queira complementar ou substituir o Trivy:
+
+| Categoria | Ferramenta | Destaque |
+|-----------|-----------|----------|
+| Container scan | **Grype** (Anchore) | Leve, bom output, integra com SBOM |
+| Container scan | **Snyk Container** | SaaS, monitoramento contínuo |
+| Container scan | **Docker Scout** | Nativo no Docker Hub |
+| SAST | **Semgrep** | Regras customizáveis, multi-linguagem |
+| SAST | **CodeQL** (GitHub) | Nativo no Actions, análise profunda |
+| Dependências | **npm audit** | Nativo no Node.js, zero config |
+| Dependências | **Dependabot** | Abre PRs automáticos de atualização |
+| Secrets | **Gitleaks** | Scanneia o histórico Git inteiro |
+| Secrets | **TruffleHog** | Detecta secrets por alta entropia |
+| IaC | **Checkov** | Políticas como código, multi-cloud |
+| IaC | **kube-score** | Score de segurança por manifesto K8s |
+| Dockerfile | **Hadolint** | Lint + boas práticas |
+| SBOM | **Syft** (Anchore) | Gera inventário completo da imagem |
+
+**Exemplo — gerar SBOM e scanear com Grype localmente:**
+```bash
+# Instalar
+brew install syft grype
+
+# Gerar inventário (SBOM) da imagem
+syft wericknalyson/argocdlab-app:latest -o spdx-json > sbom.json
+
+# Scanear o SBOM por CVEs
+grype sbom:sbom.json
+```
+
+---
+
 ## Cheatsheet de Comandos
 
 ```bash
@@ -407,6 +507,6 @@ argocdlab/
 │   └── cluster-config.yaml    # Cluster com portMappings
 ├── .github/
 │   └── workflows/
-│       └── build-push.yml     # CI: build multi-arch + push Docker Hub
+│       └── build-push.yml     # CI: build → scan Trivy → push → GitOps update
 └── README.md
 ```

@@ -73,7 +73,6 @@ jobs:
     needs: build-and-push
     permissions:
       contents: read
-      security-events: write   # necessário para upload do SARIF no GitHub Security
 
     steps:
       - name: Checkout repository
@@ -90,26 +89,20 @@ jobs:
           ignore-unfixed: true   # ignora CVEs sem patch disponível
           exit-code: 1           # falha o job se encontrar CRITICAL ou HIGH fixável
 
-      - name: Scan image — SARIF (upload para GitHub Security)
-        if: always()             # sempre executa, mesmo se o step anterior falhou
+      - name: Scan image — JSON report (artefato)
+        if: always()
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: image
           image-ref: ${{ env.IMAGE_NAME }}:sha-${{ needs.build-and-push.outputs.image-tag }}
-          format: sarif
-          output: trivy-image.sarif
+          format: json
+          output: trivy-image.json
           severity: CRITICAL,HIGH,MEDIUM
           ignore-unfixed: true
 
-      - name: Upload image scan results to GitHub Security
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: trivy-image.sarif
-          category: trivy-image
-
       # ── 2. Scan de IaC (Dockerfile + manifestos Kubernetes) ──
       - name: Scan IaC — table output (summary)
+        if: always()
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: config
@@ -118,22 +111,26 @@ jobs:
           severity: CRITICAL,HIGH
           exit-code: 0           # reporta mas não bloqueia o deploy por má config
 
-      - name: Scan IaC — SARIF (upload para GitHub Security)
+      - name: Scan IaC — JSON report (artefato)
         if: always()
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: config
           scan-ref: .
-          format: sarif
-          output: trivy-iac.sarif
+          format: json
+          output: trivy-iac.json
           severity: CRITICAL,HIGH,MEDIUM
 
-      - name: Upload IaC scan results to GitHub Security
+      # ── 3. Salva os relatórios como artefatos do workflow ──
+      - name: Upload scan reports as artifacts
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: actions/upload-artifact@v4
         with:
-          sarif_file: trivy-iac.sarif
-          category: trivy-iac
+          name: trivy-reports-sha-${{ needs.build-and-push.outputs.image-tag }}
+          path: |
+            trivy-image.json
+            trivy-iac.json
+          retention-days: 30
 
   # ──────────────────────────────────────────────────────────────────────
   # Job 3: atualiza kustomization.yaml e faz push — ArgoCD sincroniza
