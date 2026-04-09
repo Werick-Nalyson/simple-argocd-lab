@@ -8,4 +8,4 @@ resources:
 
 images:
 - name: wericknalyson/argocdlab-app
-  newTag: sha-32f0e9c
+  newTag: sha-0de295c
