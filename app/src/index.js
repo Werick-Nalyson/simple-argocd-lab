@@ -3,7 +3,7 @@ const os = require('os');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const VERSION = process.env.APP_VERSION || '1.0.0';
+const VERSION = process.env.APP_VERSION || '2.0.0';
 const START_TIME = Date.now();
 
 app.get('/', (req, res) => {
